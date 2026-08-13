@@ -127,24 +127,32 @@ def select_y_axis(page):
 
     print("[*] Waiting for Y-Axis...")
 
-    page.locator("#yAxis").wait_for(
+    y_axis = page.locator("#yAxis")
+    y_axis.wait_for(
         state="visible",
         timeout=30000
     )
 
+    # First reset Y-Axis to empty
+    print("[*] Resetting Y-Axis to default...")
+    y_axis.select_option(value="")
+    page.wait_for_timeout(500)
+
+    # Select the Y-Axis value
     print(
         f"[*] Selecting Y-Axis: {Y_AXIS_VALUE}"
     )
-
-    page.locator("#yAxis").select_option(
+    y_axis.select_option(
         value=Y_AXIS_VALUE
     )
-
     page.wait_for_timeout(500)
 
-    actual_value = page.locator(
-        "#yAxis"
-    ).input_value()
+    # Click the Y-Axis dropdown to trigger X-Axis population
+    print("[*] Clicking Y-Axis dropdown to trigger X-Axis...")
+    y_axis.click()
+    page.wait_for_timeout(500)
+
+    actual_value = y_axis.input_value()
 
     print(
         f"[*] Y-Axis current value: '{actual_value}'"
@@ -155,15 +163,16 @@ def select_y_axis(page):
         print("[!] Y-Axis selection did not stick.")
         print("[*] Retrying...")
 
-        page.locator("#yAxis").select_option(
+        y_axis.select_option(value="")
+        page.wait_for_timeout(300)
+        y_axis.select_option(
             value=Y_AXIS_VALUE
         )
-
+        page.wait_for_timeout(300)
+        y_axis.click()
         page.wait_for_timeout(500)
 
-        actual_value = page.locator(
-            "#yAxis"
-        ).input_value()
+        actual_value = y_axis.input_value()
 
     if actual_value != Y_AXIS_VALUE:
         raise RuntimeError(
@@ -172,7 +181,7 @@ def select_y_axis(page):
             f"got '{actual_value}'"
         )
 
-    print("[+] Y-Axis successfully selected")
+    print("[+] Y-Axis successfully selected and triggered")
 
 
 def print_x_axis_debug(page):
@@ -334,37 +343,11 @@ def main():
             select_y_axis(page)
 
             # ========================================================
-            # DIAGNOSTIC: dump #xAxis state immediately after the
-            # Y-Axis change, before doing anything else. This tells us
-            # whether the option disappears instantly (synchronous JS,
-            # no need to "wait" for anything) or over time.
+            # Wait for X-Axis dropdown to be populated after Y-Axis change
+            # The Y-Axis onchange triggers an AJAX call that rebuilds X-Axis options
             # ========================================================
-
-            def dump_xaxis_state(label):
-                try:
-                    state = page.locator("#xAxis").evaluate(
-                        """
-                        el => el
-                            ? {
-                                exists: true,
-                                optionCount: el.options.length,
-                                hasMonthWise: Array.from(el.options).some(o => o.value === "monthWise"),
-                                outerHTML: el.outerHTML.slice(0, 500)
-                              }
-                            : { exists: false }
-                        """
-                    )
-                except Exception as e:
-                    state = {"exists": "ERROR", "error": str(e)}
-                print(f"[DIAG:{label}] {state}")
-
-            dump_xaxis_state("immediately after Y-Axis select")
-
-            page.wait_for_timeout(1000)
-            dump_xaxis_state("1s after Y-Axis select")
-
-            page.wait_for_timeout(2000)
-            dump_xaxis_state("3s after Y-Axis select")
+            print("[*] Waiting for X-Axis to populate after Y-Axis selection...")
+            page.wait_for_timeout(2500)
 
             # ========================================================
             # X-AXIS
