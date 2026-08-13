@@ -426,6 +426,18 @@ def main():
                     "[+] CAPTCHA saved to captcha.png"
                 )
 
+                # Try OCR extraction
+                try:
+                    from ocr_service import process_captcha
+                    ocr_result = process_captcha("captcha.png")
+                    print(f"[OCR] {ocr_result['message']}")
+                    if ocr_result['is_valid']:
+                        print(f"[OCR] Extracted CAPTCHA text: {ocr_result['text']}")
+                except ImportError:
+                    print("[!] ocr_service module not available. Install pytesseract and PIL.")
+                except Exception as e:
+                    print(f"[!] OCR extraction failed: {e}")
+
             except PWTimeoutError:
 
                 print(
