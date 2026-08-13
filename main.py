@@ -1,5 +1,6 @@
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeoutError
 from side_checkpoint import select_sub_category, select_state_filters, select_class_filters
+from playwright.sync_api import TimeoutError as PWTimeoutError
 
 
 URL = "https://analytics.parivahan.gov.in/analytics/vahanpublicreport"
@@ -9,6 +10,40 @@ X_AXIS_VALUE = "monthWise"
 
 MAX_CAPTCHA_APPLY_ATTEMPTS = 5   # how many full captcha+apply cycles to try
 MAX_OCR_RETRIES_PER_ATTEMPT = 3  # OCR retries within a single cycle
+
+def download_report(page):
+    """
+    Download the report as an Excel file.
+    """
+
+    print("[*] Waiting for Download Excel button...")
+
+    try:
+        download_button = page.locator("#downloadMakerAllExcel")
+
+        download_button.wait_for(
+            state="visible",
+            timeout=30000
+        )
+
+        print("[*] Starting Excel download...")
+
+        with page.expect_download(timeout=60000) as download_info:
+            download_button.click()
+
+        download = download_info.value
+
+        # Save with the original filename
+        download.save_as(download.suggested_filename)
+
+        print(f"[+] Excel downloaded: {download.suggested_filename}")
+
+        return download.suggested_filename
+
+    except PWTimeoutError:
+        raise RuntimeError(
+            "Download Excel button did not appear."
+        )
 
 
 def wait_for_x_axis(page, timeout=30000):
@@ -606,6 +641,11 @@ def main():
                     "Automatic captcha+apply retries were exhausted. "
                     "You can finish manually in the browser."
                 )
+
+
+            # Download the report if Apply succeeded
+            if apply_succeeded:
+                download_report(page)
 
             # ========================================================
             # KEEP BROWSER OPEN
