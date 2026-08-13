@@ -266,16 +266,16 @@ def main():
             if res.request.resource_type in ("xhr", "fetch", "document", "script"):
                 print(f"    <- response: {res.status} {res.url}")
 
-        page.on("request", _log_request)
-        page.on("response", _log_response)
+        # page.on("request", _log_request)
+        # page.on("response", _log_response)
 
         # DIAGNOSTIC: catch JS errors and console messages. The Y-Axis
         # onchange handler almost certainly runs client-side JS to rebuild
         # #xAxis's option list - if that handler throws partway through,
         # it would explain #xAxis losing its "monthWise" option with no
         # network call involved at all.
-        page.on("console", lambda msg: print(f"    [console:{msg.type}] {msg.text}"))
-        page.on("pageerror", lambda exc: print(f"    [PAGE ERROR] {exc}"))
+        # page.on("console", lambda msg: print(f"    [console:{msg.type}] {msg.text}"))
+        # page.on("pageerror", lambda exc: print(f"    [PAGE ERROR] {exc}"))
 
         try:
 
