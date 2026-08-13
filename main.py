@@ -385,44 +385,66 @@ def main():
                 return
 
             # ========================================================
-            # CAPTCHA - Auto fill using OCR
+            # CAPTCHA - Auto fill using OCR with retry
             # ========================================================
 
             print("\n[*] Looking for CAPTCHA...")
 
             captcha_text = ""
+            max_retries = 3
+            retry_count = 0
 
             try:
 
-                captcha = page.locator(
-                    "#captchaImage"
-                )
-
-                captcha.wait_for(
+                captcha_img = page.locator("#captchaImage")
+                captcha_img.wait_for(
                     state="visible",
                     timeout=10000
                 )
 
-                captcha.screenshot(
-                    path="captcha.png"
-                )
+                retry_captcha_button = page.locator("#captchaImg")
 
-                print(
-                    "[+] CAPTCHA saved to captcha.png"
-                )
+                while retry_count < max_retries and not captcha_text:
+                    retry_count += 1
+                    print(f"\n[*] CAPTCHA attempt {retry_count}/{max_retries}...")
 
-                # Try OCR extraction
-                try:
-                    from ocr_service import process_captcha
-                    ocr_result = process_captcha("captcha.png")
-                    print(f"[OCR] {ocr_result['message']}")
-                    if ocr_result['is_valid']:
-                        captcha_text = ocr_result['text']
-                        print(f"[OCR] Extracted CAPTCHA text: {captcha_text}")
-                except ImportError:
-                    print("[!] ocr_service module not available. Install pytesseract and PIL.")
-                except Exception as e:
-                    print(f"[!] OCR extraction failed: {e}")
+                    # Save current CAPTCHA image
+                    captcha_img.screenshot(
+                        path="captcha.png"
+                    )
+
+                    print(
+                        "[+] CAPTCHA saved to captcha.png"
+                    )
+
+                    # Try OCR extraction
+                    try:
+                        from ocr_service import process_captcha
+                        ocr_result = process_captcha("captcha.png")
+                        print(f"[OCR] {ocr_result['message']}")
+                        if ocr_result['is_valid']:
+                            captcha_text = ocr_result['text']
+                            print(f"[OCR] Extracted CAPTCHA text: {captcha_text}")
+                        else:
+                            print(f"[OCR] Invalid CAPTCHA text, retrying...")
+                            # Click retry button for next attempt
+                            if retry_count < max_retries:
+                                retry_captcha_button.click()
+                                page.wait_for_timeout(1000)
+                    except ImportError:
+                        print("[!] ocr_service module not available. Install pytesseract and PIL.")
+                        break
+                    except Exception as e:
+                        print(f"[!] OCR extraction failed: {e}")
+                        # Click retry button for next attempt
+                        if retry_count < max_retries:
+                            retry_captcha_button.click()
+                            page.wait_for_timeout(1000)
+
+                if not captcha_text:
+                    print(
+                        f"[!] CAPTCHA extraction failed after {max_retries} attempts."
+                    )
 
             except PWTimeoutError:
 
@@ -451,7 +473,7 @@ def main():
                 print("=" * 70)
 
                 print(
-                    "OCR failed. Enter the CAPTCHA manually in the browser."
+                    "OCR failed after multiple attempts. Enter the CAPTCHA manually in the browser."
                 )
 
                 print(
