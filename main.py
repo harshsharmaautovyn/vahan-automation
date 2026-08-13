@@ -9,7 +9,11 @@ X-Axis:
     monthWise / Month Wise
 
 CAPTCHA:
-    Manual entry only. No OCR or automatic solving.
+    OCR first (via ocr_service), falling back to manual entry.
+    The whole "extract captcha -> fill -> click Apply" cycle is now
+    wrapped in a retry loop: if Apply fails (wrong captcha), we grab a
+    fresh captcha image and try again, up to MAX_CAPTCHA_APPLY_ATTEMPTS
+    times.
 
 FIX APPLIED (see comments marked "FIX"):
     Selecting Y-Axis fires the site's onchange handler, which kicks off an
@@ -18,6 +22,14 @@ FIX APPLIED (see comments marked "FIX"):
     which is exactly the "X-Axis won't select" symptom you were hitting.
     The fix waits for the network to go idle (and adds a small buffer)
     after the Y-Axis change, before touching X-Axis at all.
+
+NOTE on the retry loop:
+    I don't have access to the live page's DOM for a failed-captcha state,
+    so `check_apply_success()` below is a best-effort heuristic (it looks
+    for common "invalid captcha" wording and/or a results table). You will
+    almost certainly need to adjust the selectors/text patterns inside
+    that function to match what parivahan.gov.in actually renders when a
+    captcha is wrong vs. when the report successfully loads.
 """
 
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeoutError
@@ -27,6 +39,9 @@ URL = "https://analytics.parivahan.gov.in/analytics/vahanpublicreport"
 
 Y_AXIS_VALUE = "vehicleMakerName"
 X_AXIS_VALUE = "monthWise"
+
+MAX_CAPTCHA_APPLY_ATTEMPTS = 5   # how many full captcha+apply cycles to try
+MAX_OCR_RETRIES_PER_ATTEMPT = 3  # OCR retries within a single cycle
 
 
 def wait_for_x_axis(page, timeout=30000):
@@ -237,6 +252,231 @@ def print_x_axis_debug(page):
     print("=" * 70)
 
 
+def extract_captcha_text(page):
+    """
+    Runs the OCR-extraction loop against the CURRENT captcha image and
+    returns the extracted text, or "" if OCR couldn't confidently read it.
+    Does not click Apply. Does not fill the input.
+    """
+
+    captcha_text = ""
+    retry_count = 0
+
+    try:
+
+        captcha_img = page.locator("#captchaImage")
+        captcha_img.wait_for(
+            state="visible",
+            timeout=10000
+        )
+
+        retry_captcha_button = page.locator("#captchaImg")
+
+        while retry_count < MAX_OCR_RETRIES_PER_ATTEMPT and not captcha_text:
+            retry_count += 1
+            print(f"\n[*] CAPTCHA OCR attempt {retry_count}/{MAX_OCR_RETRIES_PER_ATTEMPT}...")
+
+            # Save current CAPTCHA image
+            captcha_img.screenshot(
+                path="captcha.png"
+            )
+
+            print(
+                "[+] CAPTCHA saved to captcha.png"
+            )
+
+            # Try OCR extraction
+            try:
+                from ocr_service import process_captcha
+                ocr_result = process_captcha("captcha.png")
+
+                if not isinstance(ocr_result, dict) or "is_valid" not in ocr_result:
+                    print(
+                        f"[!] ocr_service returned an unexpected shape: {ocr_result!r}"
+                    )
+                elif ocr_result['is_valid']:
+                    captcha_text = ocr_result['text']
+                    print(f"[OCR] {ocr_result.get('message', '')}")
+                    print(f"[OCR] Extracted CAPTCHA text: {captcha_text}")
+                else:
+                    print(f"[OCR] {ocr_result.get('message', 'Invalid CAPTCHA text')}, retrying...")
+                    if retry_count < MAX_OCR_RETRIES_PER_ATTEMPT:
+                        retry_captcha_button.click()
+                        page.wait_for_timeout(1000)
+
+            except ImportError as e:
+                print(f"[!] ocr_service module not available/importable: {e}")
+                print("[!] Install its dependencies (e.g. pytesseract, PIL) or fix the import path.")
+                break
+
+            except Exception:
+                import traceback
+                print("[!] OCR extraction call raised an exception:")
+                traceback.print_exc()
+                if retry_count < MAX_OCR_RETRIES_PER_ATTEMPT:
+                    retry_captcha_button.click()
+                    page.wait_for_timeout(1000)
+
+        if not captcha_text:
+            print(
+                f"[!] CAPTCHA OCR extraction failed after {MAX_OCR_RETRIES_PER_ATTEMPT} attempts."
+            )
+
+    except PWTimeoutError:
+
+        print(
+            "[!] CAPTCHA image was not found."
+        )
+
+    return captcha_text
+
+
+def fill_captcha(page, captcha_text):
+    """
+    Fills the captcha input. Falls back to manual entry if captcha_text
+    is empty or the fill fails. Returns True once something is in the box.
+    """
+
+    if captcha_text:
+        print("\n[*] Auto-filling CAPTCHA...")
+        try:
+            captcha_input = page.locator("#externalCaptcha")
+            captcha_input.wait_for(state="visible", timeout=10000)
+            captcha_input.fill(captcha_text)
+            print(f"[+] CAPTCHA filled with: {captcha_text}")
+            return True
+        except Exception as e:
+            print(f"[!] Failed to fill CAPTCHA: {e}")
+
+    print("\n")
+    print("=" * 70)
+    print("MANUAL CAPTCHA REQUIRED")
+    print("=" * 70)
+
+    print(
+        "OCR failed (or auto-fill failed). Enter the CAPTCHA manually in the browser."
+    )
+
+    print(
+        "Do not enter the CAPTCHA in this terminal."
+    )
+
+    print("=" * 70)
+
+    input(
+        "\nPress ENTER after entering the CAPTCHA..."
+    )
+
+    return True
+
+
+def click_apply(page):
+    """
+    Clicks the Apply button. Returns True if the click itself succeeded
+    (this says nothing about whether the captcha was actually correct -
+    that's checked separately by check_apply_success).
+    """
+
+    print("[*] Clicking Apply...")
+
+    try:
+
+        apply_button = page.locator(
+            "#applyTrigger"
+        )
+
+        apply_button.wait_for(
+            state="visible",
+            timeout=10000
+        )
+
+        apply_button.click()
+
+        print("[+] Apply clicked")
+        return True
+
+    except PWTimeoutError:
+
+        print(
+            "[!] Could not click Apply automatically."
+        )
+
+        print(
+            "[!] Please click Apply manually."
+        )
+
+        return False
+
+
+def check_apply_success(page, timeout=8000):
+    """
+    Uses the site's own CAPTCHA error indicator instead of guessing:
+
+        <div class="alert alert-danger p-0">
+            <span id="captchaMsg">Invalid CAPTCHA.</span>
+        </div>
+
+    This block only becomes visible when the submitted CAPTCHA was wrong.
+    So: if #captchaMsg is visible after Apply -> failed, retry.
+        if it's not visible -> succeeded, stop.
+    """
+
+    try:
+        try:
+            page.wait_for_load_state("networkidle", timeout=timeout)
+        except PWTimeoutError:
+            page.wait_for_timeout(min(timeout, 2500))
+
+        try:
+            captcha_msg = page.locator("#captchaMsg")
+            is_visible = captcha_msg.is_visible(timeout=1500)
+        except Exception:
+            is_visible = False
+
+        if is_visible:
+            msg_text = ""
+            try:
+                msg_text = captcha_msg.inner_text().strip()
+            except Exception:
+                pass
+            print(f"[!] CAPTCHA error shown on page: '{msg_text or 'Invalid CAPTCHA.'}'")
+            return False
+
+        print("[+] No CAPTCHA error shown - treating Apply as successful.")
+        return True
+
+    except Exception as e:
+        print(f"[!] Error while checking Apply result: {e}")
+        return False
+
+
+def run_captcha_apply_cycle(page):
+    """
+    One full cycle: extract captcha -> fill -> click Apply -> check result.
+    Returns True if the cycle appears to have succeeded.
+    """
+
+    captcha_text = extract_captcha_text(page)
+    fill_captcha(page, captcha_text)
+    click_apply(page)
+
+    return check_apply_success(page)
+
+
+def get_fresh_captcha(page):
+    """
+    Clicks the captcha refresh control so the next cycle gets a new image
+    instead of retrying against the same (already-wrong) one.
+    """
+
+    try:
+        page.locator("#captchaImg").click()
+        page.wait_for_timeout(1000)
+        print("[*] Requested a fresh CAPTCHA image for the next attempt.")
+    except Exception as e:
+        print(f"[!] Could not refresh CAPTCHA image: {e}")
+
+
 def main():
 
     with sync_playwright() as p:
@@ -254,28 +494,6 @@ def main():
                 "height": 900
             }
         )
-
-        # DIAGNOSTIC: log xhr/fetch/document AND script loads this time -
-        # the previous filter excluded scripts, so we never actually saw
-        # which page-specific JS file owns the Y-Axis/X-Axis logic.
-        def _log_request(req):
-            if req.resource_type in ("xhr", "fetch", "document", "script"):
-                print(f"    -> request: {req.method} {req.url}")
-
-        def _log_response(res):
-            if res.request.resource_type in ("xhr", "fetch", "document", "script"):
-                print(f"    <- response: {res.status} {res.url}")
-
-        # page.on("request", _log_request)
-        # page.on("response", _log_response)
-
-        # DIAGNOSTIC: catch JS errors and console messages. The Y-Axis
-        # onchange handler almost certainly runs client-side JS to rebuild
-        # #xAxis's option list - if that handler throws partway through,
-        # it would explain #xAxis losing its "monthWise" option with no
-        # network call involved at all.
-        # page.on("console", lambda msg: print(f"    [console:{msg.type}] {msg.text}"))
-        # page.on("pageerror", lambda exc: print(f"    [PAGE ERROR] {exc}"))
 
         try:
 
@@ -302,39 +520,6 @@ def main():
             )
 
             print("[+] Y-Axis found")
-
-            # ========================================================
-            # DIAGNOSTIC: list every <script src> on the page, so we can
-            # identify which file actually contains the Y-Axis/X-Axis
-            # rebuild logic (the generic vendor scripts like jquery/
-            # bootstrap aren't it - we want the page-specific one).
-            # ========================================================
-            script_srcs = page.evaluate(
-                """
-                () => Array.from(document.querySelectorAll('script[src]'))
-                    .map(s => s.src)
-                """
-            )
-            print("[DIAG] <script src> tags on page:")
-            for src in script_srcs:
-                print(f"    {src}")
-
-            # ========================================================
-            # DIAGNOSTIC: scan window for any global var/function whose
-            # name mentions "axis" - if the rebuild logic exposes a
-            # reusable function or data map globally, this finds it so
-            # we can potentially call it directly instead of relying on
-            # the (apparently broken, in our automated context) onchange
-            # trigger.
-            # ========================================================
-            axis_globals = page.evaluate(
-                """
-                () => Object.keys(window)
-                    .filter(k => /axis/i.test(k))
-                    .map(k => ({ key: k, type: typeof window[k] }))
-                """
-            )
-            print(f"[DIAG] window keys matching /axis/i: {axis_globals}")
 
             # ========================================================
             # Y-AXIS
@@ -385,136 +570,34 @@ def main():
                 return
 
             # ========================================================
-            # CAPTCHA - Auto fill using OCR with retry
+            # CAPTCHA + APPLY - retry the whole cycle until it succeeds
             # ========================================================
 
-            print("\n[*] Looking for CAPTCHA...")
+            apply_succeeded = False
+            attempt = 0
 
-            captcha_text = ""
-            max_retries = 3
-            retry_count = 0
+            while attempt < MAX_CAPTCHA_APPLY_ATTEMPTS and not apply_succeeded:
+                attempt += 1
 
-            try:
-
-                captcha_img = page.locator("#captchaImage")
-                captcha_img.wait_for(
-                    state="visible",
-                    timeout=10000
-                )
-
-                retry_captcha_button = page.locator("#captchaImg")
-
-                while retry_count < max_retries and not captcha_text:
-                    retry_count += 1
-                    print(f"\n[*] CAPTCHA attempt {retry_count}/{max_retries}...")
-
-                    # Save current CAPTCHA image
-                    captcha_img.screenshot(
-                        path="captcha.png"
-                    )
-
-                    print(
-                        "[+] CAPTCHA saved to captcha.png"
-                    )
-
-                    # Try OCR extraction
-                    try:
-                        from ocr_service import process_captcha
-                        ocr_result = process_captcha("captcha.png")
-                        print(f"[OCR] {ocr_result['message']}")
-                        if ocr_result['is_valid']:
-                            captcha_text = ocr_result['text']
-                            print(f"[OCR] Extracted CAPTCHA text: {captcha_text}")
-                        else:
-                            print(f"[OCR] Invalid CAPTCHA text, retrying...")
-                            # Click retry button for next attempt
-                            if retry_count < max_retries:
-                                retry_captcha_button.click()
-                                page.wait_for_timeout(1000)
-                    except ImportError:
-                        print("[!] ocr_service module not available. Install pytesseract and PIL.")
-                        break
-                    except Exception as e:
-                        print(f"[!] OCR extraction failed: {e}")
-                        # Click retry button for next attempt
-                        if retry_count < max_retries:
-                            retry_captcha_button.click()
-                            page.wait_for_timeout(1000)
-
-                if not captcha_text:
-                    print(
-                        f"[!] CAPTCHA extraction failed after {max_retries} attempts."
-                    )
-
-            except PWTimeoutError:
-
-                print(
-                    "[!] CAPTCHA image was not found."
-                )
-
-            # ========================================================
-            # AUTO-FILL CAPTCHA
-            # ========================================================
-
-            if captcha_text:
-                print("\n[*] Auto-filling CAPTCHA...")
-                try:
-                    captcha_input = page.locator("#externalCaptcha")
-                    captcha_input.wait_for(state="visible", timeout=10000)
-                    captcha_input.fill(captcha_text)
-                    print(f"[+] CAPTCHA filled with: {captcha_text}")
-                except Exception as e:
-                    print(f"[!] Failed to fill CAPTCHA: {e}")
-                    captcha_text = ""
-            else:
                 print("\n")
                 print("=" * 70)
-                print("MANUAL CAPTCHA REQUIRED")
+                print(f"CAPTCHA + APPLY CYCLE {attempt}/{MAX_CAPTCHA_APPLY_ATTEMPTS}")
                 print("=" * 70)
 
-                print(
-                    "OCR failed after multiple attempts. Enter the CAPTCHA manually in the browser."
-                )
+                apply_succeeded = run_captcha_apply_cycle(page)
 
-                print(
-                    "Do not enter the CAPTCHA in this terminal."
-                )
+                if not apply_succeeded and attempt < MAX_CAPTCHA_APPLY_ATTEMPTS:
+                    print("[!] Cycle failed. Getting a fresh CAPTCHA and retrying...")
+                    get_fresh_captcha(page)
 
+            if not apply_succeeded:
+                print("\n")
                 print("=" * 70)
-
-                input(
-                    "\nPress ENTER after entering the CAPTCHA..."
-                )
-
-            # ========================================================
-            # APPLY
-            # ========================================================
-
-            print("[*] Clicking Apply...")
-
-            try:
-
-                apply_button = page.locator(
-                    "#applyTrigger"
-                )
-
-                apply_button.wait_for(
-                    state="visible",
-                    timeout=10000
-                )
-
-                apply_button.click()
-
-                print("[+] Apply clicked")
-
-            except PWTimeoutError:
-
+                print(f"GAVE UP after {MAX_CAPTCHA_APPLY_ATTEMPTS} attempts")
+                print("=" * 70)
                 print(
-                    "[!] Could not click Apply automatically."
-                )
-
-                print(
-                    "[!] Please click Apply manually."
+                    "Automatic captcha+apply retries were exhausted. "
+                    "You can finish manually in the browser."
                 )
 
             # ========================================================
@@ -523,7 +606,7 @@ def main():
 
             print("\n")
             print("=" * 70)
-            print("DONE")
+            print("DONE" if apply_succeeded else "STOPPED (manual finish needed)")
             print("=" * 70)
 
             input(
