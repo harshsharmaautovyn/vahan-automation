@@ -402,10 +402,12 @@ def main():
                 return
 
             # ========================================================
-            # CAPTCHA (unchanged - manual entry only, as requested)
+            # CAPTCHA - Auto fill using OCR
             # ========================================================
 
             print("\n[*] Looking for CAPTCHA...")
+
+            captcha_text = ""
 
             try:
 
@@ -432,7 +434,8 @@ def main():
                     ocr_result = process_captcha("captcha.png")
                     print(f"[OCR] {ocr_result['message']}")
                     if ocr_result['is_valid']:
-                        print(f"[OCR] Extracted CAPTCHA text: {ocr_result['text']}")
+                        captcha_text = ocr_result['text']
+                        print(f"[OCR] Extracted CAPTCHA text: {captcha_text}")
                 except ImportError:
                     print("[!] ocr_service module not available. Install pytesseract and PIL.")
                 except Exception as e:
@@ -445,27 +448,38 @@ def main():
                 )
 
             # ========================================================
-            # MANUAL CAPTCHA
+            # AUTO-FILL CAPTCHA
             # ========================================================
 
-            print("\n")
-            print("=" * 70)
-            print("MANUAL CAPTCHA REQUIRED")
-            print("=" * 70)
+            if captcha_text:
+                print("\n[*] Auto-filling CAPTCHA...")
+                try:
+                    captcha_input = page.locator("#externalCaptcha")
+                    captcha_input.wait_for(state="visible", timeout=10000)
+                    captcha_input.fill(captcha_text)
+                    print(f"[+] CAPTCHA filled with: {captcha_text}")
+                except Exception as e:
+                    print(f"[!] Failed to fill CAPTCHA: {e}")
+                    captcha_text = ""
+            else:
+                print("\n")
+                print("=" * 70)
+                print("MANUAL CAPTCHA REQUIRED")
+                print("=" * 70)
 
-            print(
-                "Enter the CAPTCHA manually in the browser."
-            )
+                print(
+                    "OCR failed. Enter the CAPTCHA manually in the browser."
+                )
 
-            print(
-                "Do not enter the CAPTCHA in this terminal."
-            )
+                print(
+                    "Do not enter the CAPTCHA in this terminal."
+                )
 
-            print("=" * 70)
+                print("=" * 70)
 
-            input(
-                "\nPress ENTER after entering the CAPTCHA..."
-            )
+                input(
+                    "\nPress ENTER after entering the CAPTCHA..."
+                )
 
             # ========================================================
             # APPLY
