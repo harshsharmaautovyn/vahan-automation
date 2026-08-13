@@ -301,8 +301,15 @@ def extract_captcha_text(page):
                 else:
                     print(f"[OCR] {ocr_result.get('message', 'Invalid CAPTCHA text')}, retrying...")
                     if retry_count < MAX_OCR_RETRIES_PER_ATTEMPT:
+                        old_image = captcha_img.screenshot()
+
                         retry_captcha_button.click()
-                        page.wait_for_timeout(1000)
+
+                        for _ in range(20):
+                            page.wait_for_timeout(500)
+                            new_image = captcha_img.screenshot()
+                            if new_image != old_image:
+                                break
 
             except ImportError as e:
                 print(f"[!] ocr_service module not available/importable: {e}")
@@ -314,8 +321,18 @@ def extract_captcha_text(page):
                 print("[!] OCR extraction call raised an exception:")
                 traceback.print_exc()
                 if retry_count < MAX_OCR_RETRIES_PER_ATTEMPT:
+                    old_image = captcha_img.screenshot()
+
                     retry_captcha_button.click()
-                    page.wait_for_timeout(1000)
+
+                    for _ in range(20):
+                        page.wait_for_timeout(500)
+                        new_image = captcha_img.screenshot()
+                        if new_image != old_image:
+                            break
+
+
+
 
         if not captcha_text:
             print(
@@ -342,6 +359,7 @@ def fill_captcha(page, captcha_text):
         try:
             captcha_input = page.locator("#externalCaptcha")
             captcha_input.wait_for(state="visible", timeout=10000)
+            captcha_input.clear()
             captcha_input.fill(captcha_text)
             print(f"[+] CAPTCHA filled with: {captcha_text}")
             return True
@@ -464,17 +482,31 @@ def run_captcha_apply_cycle(page):
 
 
 def get_fresh_captcha(page):
-    """
-    Clicks the captcha refresh control so the next cycle gets a new image
-    instead of retrying against the same (already-wrong) one.
-    """
+    print("[DEBUG] Entered get_fresh_captcha")
 
-    try:
-        page.locator("#captchaImg").click()
-        page.wait_for_timeout(1000)
-        print("[*] Requested a fresh CAPTCHA image for the next attempt.")
-    except Exception as e:
-        print(f"[!] Could not refresh CAPTCHA image: {e}")
+    captcha_img = page.locator("#captchaImage")
+    refresh_btn = page.locator("#captchaImg")
+
+    # Capture the current image bytes
+    old_image = captcha_img.screenshot()
+    print("[DEBUG] Captured old captcha")
+
+    # Trigger refresh using JavaScript (avoids Playwright waiting)
+    refresh_btn.evaluate("el => el.click()")
+    print("[DEBUG] Refresh button clicked")
+
+    # Wait until the image pixels actually change
+    for i in range(20):
+        page.wait_for_timeout(500)
+        new_image = captcha_img.screenshot()
+
+        if new_image != old_image:
+            print(f"[DEBUG] Captcha changed after {i+1} checks")
+            return
+
+        print(f"[DEBUG] Still waiting... {i+1}/20")
+
+    raise RuntimeError("CAPTCHA image never changed after refresh.")
 
 
 def main():
@@ -588,7 +620,9 @@ def main():
 
                 if not apply_succeeded and attempt < MAX_CAPTCHA_APPLY_ATTEMPTS:
                     print("[!] Cycle failed. Getting a fresh CAPTCHA and retrying...")
+                    print("[*] Refreshing captcha...")
                     get_fresh_captcha(page)
+                    print("[*] Starting next OCR cycle...")
 
             if not apply_succeeded:
                 print("\n")
