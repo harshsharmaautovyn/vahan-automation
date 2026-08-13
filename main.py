@@ -1,38 +1,5 @@
-"""
-Vahan Public Report - form filler
-==================================
-
-Y-Axis:
-    vehicleMakerName
-
-X-Axis:
-    monthWise / Month Wise
-
-CAPTCHA:
-    OCR first (via ocr_service), falling back to manual entry.
-    The whole "extract captcha -> fill -> click Apply" cycle is now
-    wrapped in a retry loop: if Apply fails (wrong captcha), we grab a
-    fresh captcha image and try again, up to MAX_CAPTCHA_APPLY_ATTEMPTS
-    times.
-
-FIX APPLIED (see comments marked "FIX"):
-    Selecting Y-Axis fires the site's onchange handler, which kicks off an
-    AJAX call that rebuilds/resets #xAxis. If X-Axis is touched before that
-    call finishes, the selection gets silently overwritten a moment later -
-    which is exactly the "X-Axis won't select" symptom you were hitting.
-    The fix waits for the network to go idle (and adds a small buffer)
-    after the Y-Axis change, before touching X-Axis at all.
-
-NOTE on the retry loop:
-    I don't have access to the live page's DOM for a failed-captcha state,
-    so `check_apply_success()` below is a best-effort heuristic (it looks
-    for common "invalid captcha" wording and/or a results table). You will
-    almost certainly need to adjust the selectors/text patterns inside
-    that function to match what parivahan.gov.in actually renders when a
-    captcha is wrong vs. when the report successfully loads.
-"""
-
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeoutError
+from side_checkpoint import select_sub_category, select_state_filters, select_class_filters
 
 
 URL = "https://analytics.parivahan.gov.in/analytics/vahanpublicreport"
@@ -600,6 +567,12 @@ def main():
                 )
 
                 return
+
+
+            # select_passenger_filters(page)
+            select_state_filters(page)
+            select_sub_category(page)
+            select_class_filters(page)
 
             # ========================================================
             # CAPTCHA + APPLY - retry the whole cycle until it succeeds
