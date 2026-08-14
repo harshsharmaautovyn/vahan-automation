@@ -2,6 +2,8 @@ from playwright.sync_api import sync_playwright, TimeoutError as PWTimeoutError
 from side_checkpoint import select_sub_category, select_state_filters, select_class_filters
 from playwright.sync_api import TimeoutError as PWTimeoutError
 
+from pathlib import Path
+
 
 URL = "https://analytics.parivahan.gov.in/analytics/vahanpublicreport"
 
@@ -34,11 +36,17 @@ def download_report(page):
         download = download_info.value
 
         # Save with the original filename
-        download.save_as(download.suggested_filename)
+        # Create data folder if it doesn't exist
+        data_dir = Path("data")
+        data_dir.mkdir(exist_ok=True)
 
-        print(f"[+] Excel downloaded: {download.suggested_filename}")
+        # Save inside data folder
+        file_path = data_dir / download.suggested_filename
+        download.save_as(str(file_path))
 
-        return download.suggested_filename
+        print(f"[+] Excel downloaded: {file_path}")
+        
+        return str(file_path)
 
     except PWTimeoutError:
         raise RuntimeError(
