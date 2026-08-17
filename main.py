@@ -11,6 +11,7 @@ from side_checkpoint import (
 from playwright.sync_api import TimeoutError as PWTimeoutError
 
 from pathlib import Path
+import re
 
 
 URL = "https://analytics.parivahan.gov.in/analytics/vahanpublicreport"
@@ -21,45 +22,38 @@ X_AXIS_VALUE = "monthWise"
 MAX_CAPTCHA_APPLY_ATTEMPTS = 5   # how many full captcha+apply cycles to try
 MAX_OCR_RETRIES_PER_ATTEMPT = 3  # OCR retries within a single cycle
 
-def download_report(page):
+
+
+def download_report(page, report_name):
     """
-    Download the report as an Excel file.
+    Download the report as an Excel file with a custom name.
     """
 
     print("[*] Waiting for Download Excel button...")
 
-    try:
-        download_button = page.locator("#downloadMakerAllExcel")
+    download_button = page.locator("#downloadMakerAllExcel")
+    download_button.wait_for(state="visible", timeout=30000)
 
-        download_button.wait_for(
-            state="visible",
-            timeout=30000
-        )
+    with page.expect_download(timeout=60000) as download_info:
+        download_button.click()
 
-        print("[*] Starting Excel download...")
+    download = download_info.value
 
-        with page.expect_download(timeout=60000) as download_info:
-            download_button.click()
+    data_dir = Path("data")
+    data_dir.mkdir(exist_ok=True)
 
-        download = download_info.value
+    # Get original extension (.xls or .xlsx)
+    extension = Path(download.suggested_filename).suffix
 
-        # Save with the original filename
-        # Create data folder if it doesn't exist
-        data_dir = Path("data")
-        data_dir.mkdir(exist_ok=True)
+    # Make filename safe
+    safe_name = re.sub(r'[<>:"/\\\\|?*]', "_", report_name)
 
-        # Save inside data folder
-        file_path = data_dir / download.suggested_filename
-        download.save_as(str(file_path))
+    file_path = data_dir / f"{safe_name}{extension}"
+    download.save_as(str(file_path))
 
-        print(f"[+] Excel downloaded: {file_path}")
-        
-        return str(file_path)
+    print(f"[+] Excel downloaded: {file_path}")
 
-    except PWTimeoutError:
-        raise RuntimeError(
-            "Download Excel button did not appear."
-        )
+    return str(file_path)
 
 
 def wait_for_x_axis(page, timeout=30000):
@@ -661,7 +655,7 @@ def main():
 
             # Download the report if Apply succeeded
             if apply_succeeded:
-                download_report(page)
+                download_report(page, "All_States")
                 # double_click_all_state(page)
 
 
@@ -694,7 +688,7 @@ def main():
                         get_fresh_captcha(page)
 
                 if apply_succeeded:
-                    download_report(page)
+                    download_report(page, state)
 
                 # Small wait before next state
                 page.wait_for_timeout(1000)
