@@ -1,5 +1,13 @@
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeoutError
-from side_checkpoint import select_sub_category, select_state_filters, select_class_filters
+from side_checkpoint import (
+    STATE_FILTERS,
+    select_state_filters,
+    reset_state_dropdown,
+    select_single_state,
+    select_sub_category,
+    select_class_filters,
+    double_click_all_state
+)
 from playwright.sync_api import TimeoutError as PWTimeoutError
 
 from pathlib import Path
@@ -654,6 +662,42 @@ def main():
             # Download the report if Apply succeeded
             if apply_succeeded:
                 download_report(page)
+                # double_click_all_state(page)
+
+
+
+            for state in STATE_FILTERS:
+
+                print("\n" + "="*70)
+                print(f"PROCESSING STATE: {state}")
+                print("="*70)
+
+                # Reset the dropdown exactly like doing All -> All manually
+                # reset_state_dropdown(page)
+
+                # Select only one state
+                select_single_state(page, state)
+
+                # Filters stay the same
+                select_sub_category(page)
+                select_class_filters(page)
+
+                apply_succeeded = False
+                attempt = 0
+
+                while attempt < MAX_CAPTCHA_APPLY_ATTEMPTS and not apply_succeeded:
+                    attempt += 1
+
+                    apply_succeeded = run_captcha_apply_cycle(page)
+
+                    if not apply_succeeded and attempt < MAX_CAPTCHA_APPLY_ATTEMPTS:
+                        get_fresh_captcha(page)
+
+                if apply_succeeded:
+                    download_report(page)
+
+                # Small wait before next state
+                page.wait_for_timeout(1000)
 
             # ========================================================
             # KEEP BROWSER OPEN
