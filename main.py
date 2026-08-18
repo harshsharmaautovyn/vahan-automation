@@ -13,6 +13,8 @@ from playwright.sync_api import TimeoutError as PWTimeoutError
 from pathlib import Path
 import re
 
+from datetime import datetime
+
 
 URL = "https://analytics.parivahan.gov.in/analytics/vahanpublicreport"
 
@@ -22,13 +24,11 @@ X_AXIS_VALUE = "monthWise"
 MAX_CAPTCHA_APPLY_ATTEMPTS = 5   # how many full captcha+apply cycles to try
 MAX_OCR_RETRIES_PER_ATTEMPT = 3  # OCR retries within a single cycle
 
+RUN_DATE = datetime.now().strftime("%Y-%m-%d")
+
 
 
 def download_report(page, report_name):
-    """
-    Download the report as an Excel file with a custom name.
-    """
-
     print("[*] Waiting for Download Excel button...")
 
     download_button = page.locator("#downloadMakerAllExcel")
@@ -42,13 +42,10 @@ def download_report(page, report_name):
     data_dir = Path("data")
     data_dir.mkdir(exist_ok=True)
 
-    # Get original extension (.xls or .xlsx)
     extension = Path(download.suggested_filename).suffix
-
-    # Make filename safe
     safe_name = re.sub(r'[<>:"/\\\\|?*]', "_", report_name)
 
-    file_path = data_dir / f"{safe_name}{extension}"
+    file_path = data_dir / f"{RUN_DATE}_{safe_name}{extension}"
     download.save_as(str(file_path))
 
     print(f"[+] Excel downloaded: {file_path}")
