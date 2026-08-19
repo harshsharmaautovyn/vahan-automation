@@ -33,7 +33,7 @@ jobs:
         run: |
           python -m PyInstaller --onedir `
             --name Parivahan `
-            --add-data "tesseract;tesseract" `
+            --add-data "tesaract;tesaract" `
             --add-data "ms-playwright;ms-playwright" `
             main.py
 
