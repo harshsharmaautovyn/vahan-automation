@@ -5,6 +5,19 @@ OCR Service for CAPTCHA extraction using Tesseract
 import pytesseract
 from PIL import Image
 import re
+import os
+import sys
+
+# Find bundled Tesseract when running as EXE
+if getattr(sys, "frozen", False):
+    base_path = sys._MEIPASS
+else:
+    base_path = os.path.dirname(__file__)
+
+tesseract_path = os.path.join(base_path, "tesseract", "tesseract.exe")
+
+if os.path.exists(tesseract_path):
+    pytesseract.pytesseract.tesseract_cmd = tesseract_path
 
 
 def extract_text_from_image(image_path: str) -> str:
