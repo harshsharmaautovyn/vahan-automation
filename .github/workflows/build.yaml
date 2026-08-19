@@ -27,8 +27,9 @@ jobs:
           python -m playwright install chromium
 
       - name: Build application
+        shell: pwsh
         run: |
-          pyinstaller --onedir `
+          python -m PyInstaller --onedir `
             --name Parivahan `
             --add-data "tesseract;tesseract" `
             --add-data "ms-playwright;ms-playwright" `
