@@ -14,7 +14,7 @@ if getattr(sys, "frozen", False):
 else:
     base_path = os.path.dirname(__file__)
 
-tesseract_path = os.path.join(base_path, "tesaract", "tesaract.exe")
+tesseract_path = os.path.join(base_path, "tesseract", "tesseract.exe")
 
 if os.path.exists(tesseract_path):
     pytesseract.pytesseract.tesseract_cmd = tesseract_path
